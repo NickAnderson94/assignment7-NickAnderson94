@@ -8,31 +8,52 @@ output: html_document
 In the following assignment you will be looking at data from an one level of an online geography tutoring system used by 5th grade students. The game involves a pre-test of geography knowledge (pre.test), a series of assignments for which you have the average score (av.assignment.score),  the number of messages sent by each student to other students about the assignments (messages), the number of forum posts students posted asking questions about the assignment (forum.posts), a post test at the end of the level (post.test) and whether or not the system allowed the students to go on to the next level (level.up).  
 
 #Upload data
-```{r}
+```{r setup}
+
+library(rpart)
+library(ROCR)
+library(ggplot2)
+library(tidyverse)
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE)
+
+D1 <- read.csv("online.data.csv")
 
 ```
 
 #Visualization 
-```{r}
+```{r Visualization}
 #Start by creating histograms of the distributions for all variables (#HINT: look up "facet" in the ggplot documentation)
+ggplot(data = D1, aes(x = post.test.score)) + geom_histogram() + facet_grid(level.up ~.)
+ggplot(data = D1, aes(x = pre.test.score)) + geom_histogram() + facet_grid(level.up ~.)
+ggplot(data = D1, aes(x = messages)) + geom_histogram() + facet_grid(level.up ~.)
+ggplot(data = D1, aes(x = forum.posts)) + geom_histogram() + facet_grid(level.up ~.)
+ggplot(data = D1, aes(x = av.assignment.score)) + geom_histogram() + facet_grid(level.up ~.)
 
 #Then visualize the relationships between variables
+pairs(D1[,1:6], col = D1$level.up)
+ggsave("Scatter matrix by subgroup.pdf", path = file.path(getwd(), "Images"))
 
 #Try to capture an intution about the data and the relationships
+#There seem to be several strong positive relationships in this data, there also seems to be two clusters of data based on level.up
 
 ```
 #Classification tree
-```{r}
+
+```{r Classification tree}
 #Create a classification tree that predicts whether a student "levels up" in the online course using three variables of your choice (As we did last time, set all controls to their minimums)
+c.tree <- rpart(level.up ~ messages, method="class", data = D1, control = rpart.control(minsplit = 10, cp = .001))
+c.tree
 
 #Plot and generate a CP table for your tree 
+printcp(c.tree)
+post(c.tree, file = "tree_messages.ps", title = "Certification results") #plot
 
 #Generate a probability value that represents the probability that a student levels up based your classification tree 
+D1$pred <- predict(c.tree, type = "prob")[,2]#Last class we used type = "class" which predicted the classification for us, this time we are using type = "prob" to see the probability that our classififcation is based on.
 
-D1$pred <- predict(rp, type = "prob")[,2]#Last class we used type = "class" which predicted the classification for us, this time we are using type = "prob" to see the probability that our classififcation is based on.
 
 #Now you can generate the ROC curve for your model. You will need to install the package ROCR to do this.
-
+#install.packages("ROCR")
 library(ROCR)
 
 #Plot the curve
@@ -40,38 +61,91 @@ pred.detail <- prediction(D1$pred, D1$level.up)
 plot(performance(pred.detail, "tpr", "fpr"))
 abline(0, 1, lty = 2)
 
+#it seems that we make no errors in this model, our false positive rate is 0, and our true positive rate is 1. This could be because we are generating predictions on the same dataset we used to build the model, thus we may have overfit the model.
+
+#Since my model fit "too" well, I respecified a single model with only messages
+
 #Calculate the Area Under the Curve
-unlist(slot(performance(Pred2,"auc"), "y.values"))#Unlist liberates the AUC value from the "performance" object created by ROCR
+unlist(slot(performance(pred.detail,"auc"), "y.values"))#Unlist liberates the AUC value from the "performance" object created by ROCR
+
+#with only messages in my model, I get a AUC of .88 - which is not bad. I am feeling that this model has decent predictive power.
 
 #Now repeat this process, but using the variables you did not use for the previous model and compare the plots & results of your two models. Which one do you think was the better model? Why?
 
+#build classification tree
+c.tree1 <- rpart(level.up ~ post.test.score + forum.posts + av.assignment.score, method="class", data = D1, control = rpart.control(minsplit = 10, cp = .001))
+
+#Create CP table for new model and decision tree
+printcp(c.tree1)
+post(c.tree1, file = "tree_new.ps", title = "Certification results")
+
+#add predictions back to original dataset
+D1$pred1 <- predict(c.tree1, type = "prob")[,2]
+
+#Plot the curve
+pred.detail1 <- prediction(D1$pred1, D1$level.up) 
+plot(performance(pred.detail1, "tpr", "fpr"))
+abline(0, 1, lty = 2)
+
+#look at area under curve
+unlist(slot(performance(pred.detail1,"auc"), "y.values"))
+
+#the AUC of the second model is 1 - meaning we are making perfect predictions 
 ```
 #Thresholds
-```{r}
+```{r Tresholds}
 #Look at the ROC plot for your first model. Based on this plot choose a probability threshold that balances capturing the most correct predictions against false positives. Then generate a new variable in your data set that classifies each student according to your chosen threshold.
 
-threshold.pred1 <- 
+D1$threshold.pred <- ifelse(D1$pred >= .80, 1, 0) 
 
 #Now generate three diagnostics:
+table(D1$level.up, D1$threshold.pred)
 
-D1$accuracy.model1 <-
+#use table to work out the number of true positives, false positives, and false negatives.
+true_positive <- 211
+false_positive <- 39
+false_negative <- 189
 
-D1$precision.model1 <- 
+correct_pred <- sum(561,211)
+wrong_pred <- sum(39,189)
 
-D1$recall.model1 <- 
+D1$accuracy.model1 <- correct_pred / 1000
+#accuracy = 77.2%
+
+D1$precision.model1 <- true_positive / (true_positive + false_positive)
+#precision is 84.4%
+
+D1$recall.model1 <- true_positive / (true_positive + false_negative)
+#recall is estimated to be 52.75%
 
 #Finally, calculate Kappa for your model according to:
 
 #First generate the table of comparisons
-table1 <- table(D1$level.up, D1$threshold.pred1)
+table1 <- table(D1$level.up, D1$threshold.pred)
+table1
 
 #Convert to matrix
 matrix1 <- as.matrix(table1)
 
 #Calculate kappa
 kappa(matrix1, exact = TRUE)/kappa(matrix1)
+#kappa is 1.04
 
 #Now choose a different threshold value and repeat these diagnostics. What conclusions can you draw about your two thresholds?
+
+#I chose a threshold value of 50%, down from 80%
+D1$threshold.pred2 <- ifelse(D1$pred > .50, 1, 0) 
+
+#First generate the table of comparisons
+table2 <- table(D1$level.up, D1$threshold.pred2)
+
+#Convert to matrix
+matrix2 <- as.matrix(table2)
+
+#Calculate kappa
+kappa(matrix2, exact = TRUE)/kappa(matrix2)
+
+#my kappa decline from 1.04 to .94 - meaning the correlation between the observed and predicted level for our level_up variable has decreased. We have a worse model in this second one when we used a threshold probability of .5 as compared to the first model that used a prediction threshold probability of .8.
 
 ```
 
